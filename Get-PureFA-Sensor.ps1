@@ -178,7 +178,8 @@ function Get-ResultElement{
         [string]$customunit,
         [string]$float,
         [string]$volumesize,
-        [switch]$notifychanged
+        [bool]$notifychanged,
+        [string]$valuelookup
     )
 
     $result = "<Result>"
@@ -192,6 +193,9 @@ function Get-ResultElement{
     $result += "<VolumeSize>$($volumesize)</VolumeSize>"
     if($notifychanged){
         $result += "<NotifyChanged></NotifyChanged>"
+    }
+    if($valuelookup){
+        $result += "<ValueLookup>$($valuelookup)</ValueLookup>"
     }
 
     $result += "</Result>"
@@ -208,11 +212,12 @@ function Get-ArraySpace{
     try{
         $arrayspace = Invoke-RestMethod -Uri "$array/api/$apiversion/array?space=true" -websession $mysession -ContentType "application/json"
         
-        Get-ResultElement "Total Capacity"  $arrayspace[0].capacity "BytesDisk" "none" 1 "GigaByte" $false
-        Get-ResultElement "Capacity Used"  $arrayspace[0].total "BytesDisk" "none" 1 "GigaByte" $false
+        $global:output += "<prtg>"
+        $global:output += Get-ResultElement "Total Capacity"  $arrayspace[0].capacity "BytesDisk" "none" 1 "GigaByte" $false
+        $global:output += Get-ResultElement "Capacity Used"  $arrayspace[0].total "BytesDisk" "none" 1 "GigaByte" $false
         $available = ($arrayspace[0].capacity - $arrayspace[0].total)
-        Get-ResultElement "Capacity Available"  $available "BytesDisk" "none" 1 "GigaByte" $false
-        Get-ResultElement "Data Reduction Rate"  $arrayspace[0].data_reduction "Count" "none" 1 "One" $false
+        $global:output += Get-ResultElement "Capacity Available"  $available "BytesDisk" "none" 1 "GigaByte" $false
+        $global:output += Get-ResultElement "Data Reduction Rate"  $arrayspace[0].data_reduction "Count" "none" 1 "One" $false
 
         #write-host $arrayspace[0].shared_space
         #write-host $arrayspace[0].snapshots
@@ -233,18 +238,15 @@ function Get-ArrayPerformance{
 
     try{
         $arrayperf = Invoke-RestMethod -Uri "$array/api/$apiversion/array?action=monitor" -websession $mysession -ContentType "application/json"
-        Get-ResultElement "IOPs Reads" $arrayperf[0].reads_per_sec "Count" "none" 1 "One" $false
-        Get-ResultElement "IOPs Writes" $arrayperf[0].writes_per_sec "Count" "none" 1 "One" $false
-        Get-ResultElement "Bandwidth Read" $arrayperf[0].output_per_sec "BytesBandwidth" "none" 1 "MegaBit" $false
-        Get-ResultElement "Bandwidth Write" $arrayperf[0].input_per_sec "BytesBandwidth" "none" 1 "MegaBit" $false
-        Get-ResultElement "Latency Read μs" $arrayperf[0].usec_per_read_op "TimeResponse" "none" 1 "One" $false
-        Get-ResultElement "Latency Write μs" $arrayperf[0].usec_per_write_op "TimeResponse" "none" 1 "One" $false
-
-        #write-host $arrayperf[0].
-        #write-host $arrayperf[0].x
-        #write-host $arrayperf[0].queue_depth
-        #write-host $arrayperf[0].
-        #write-host $arrayperf[0].
+        $global:output += Get-ResultElement "IOPs Reads" $arrayperf[0].reads_per_sec "Count" "none" 1 "One" $false
+        $global:output += Get-ResultElement "IOPs Writes" $arrayperf[0].writes_per_sec "Count" "none" 1 "One" $false
+        $global:output += Get-ResultElement "Bandwidth Read" $arrayperf[0].output_per_sec "BytesBandwidth" "none" 1 "MegaBit" $false
+        $global:output += Get-ResultElement "Bandwidth Write" $arrayperf[0].input_per_sec "BytesBandwidth" "none" 1 "MegaBit" $false
+        $global:output += Get-ResultElement "Latency Read μs" $arrayperf[0].usec_per_read_op "TimeResponse" "none" 1 "One" $false
+        $global:output += Get-ResultElement "Latency Write μs" $arrayperf[0].usec_per_write_op "TimeResponse" "none" 1 "One" $false
+        $global:output += Get-ResultElement "Queue Depth"  $arrayperf[0].queue_depth "Count" "none" 0 "One" $false
+        $global:output += "<text>Array Health</text>"
+        $global:output += "</prtg>"
     }
     catch{
         ErrorState "1"  "Array Perf Query Failed"  $_.Exception.Message
@@ -257,11 +259,14 @@ function get-HardwareStatus{
 
     try{
         $hardware = Invoke-RestMethod -Uri "$array/api/$apiversion/hardware" -websession $mysession -ContentType "application/json"
+        $global:output += "<prtg>"
         foreach($item in $hardware){
             if($item.name.substring(0,2) -eq "CT"){
-                #write-host "Hardware: $($item.name)     Status: $($item.Status)"
+                $global:output += Get-ResultElement "Component $($item.name)" $hardware_status[$item.status] "Count" "none" 0 "One" $true ($scriptPath + $hardwareLookupFile)
             } 
         }
+        $global:output += "<text>Hardware Health</text>"
+        $global:output += "</prtg>"
     }
     catch{
         ErrorState "1"  "Hardware Query Failed"  $_.Exception.Message
@@ -274,9 +279,12 @@ function get-DriveStatus(){
 
     try{
         $drives = Invoke-RestMethod -Uri "$array/api/$apiversion/drive" -websession $mysession -ContentType "application/json"
-        foreach($drive in $drives){
-            #write-host "Drive: $($drive.name)     Status: $($drive.Status)" 
+        $global:output += "<prtg>"
+        foreach($drive in $drives){ 
+            $global:output += Get-ResultElement "Drive $($drive.name)" $drive_status[$drive.status] "Count" "none" 0 "One" $true ($scriptPath + $driveLookupFile)
         }
+        $global:output += "<text>Drive Health</text>"
+        $global:output += "</prtg>"
     }
     catch{
         ErrorState "1"  "Drive Query Failed"  $_.Exception.Message
@@ -355,6 +363,7 @@ $timer.Start();
 
 
 $mysession = Get-Session
+$global:output = '<?xml version="1.0" encoding="UTF-8" ?>'
 
 if($ArraySensor){
     Get-ArraySpace
@@ -373,6 +382,8 @@ if($HostgroupSensor){
 $mysession = $null
 
 $timer.Stop();
+
+Write-Host $global:output
 
 Show-Message "information" "Elapsed Time: $($timer.Elapsed)"
 
