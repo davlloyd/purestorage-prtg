@@ -101,18 +101,21 @@ C:\PS>Get_PureFA-Sensor.ps1 -ArrayAddress 1.2.3.4 -Username pureuser -Password p
 param(
     #[Parameter(Mandatory=$true)]
     [string]$ArrayAddress = "172.16.85.10",
-    [string]$UserName = $null,
-    [string]$Password = $null,
-    [string]$APIKey = "87c64157-6d0d-6284-bded-29ca6a9d44bb",
+    [string]$UserName = "pureuser",
+    [string]$Password = "pureuser",
+    [string]$APIKey = $null,
     [string]$Scope = "capacity",
     [switch]$DebugDump = $true
 )
 
 # Global Variables
+$global:arrayname = $null
 $apiversion = "1.6"
 [string]$array = "https://$($ArrayAddress)"
 $timer = [system.diagnostics.stopwatch]::new()
+$sensorlistfile = $null
 $scriptPath = "C:\Program Files (x86)\PRTG Network Monitor\Custom Sensors\EXEXML\";
+$global:output = '<?xml version="1.0" encoding="UTF-8" ?><prtg>'
 
 # Lookup files are used to translate between the integer values applied to each channel value in 
 # replacement for default textual values. PRTG requires numeric values
@@ -233,11 +236,11 @@ function Get-ResultElement{
         [string]$volumesize = "One",
         [bool]$notifychanged = $false,
         [string]$valuelookup = $null,
-        [int]$warningmin = -1,
-        [int]$warningmax,
+        [bigint]$warningmin = -1,
+        [bigint]$warningmax,
         [string]$warningmsg = $null,
-        [int]$errormin = -1,
-        [int]$errormax,
+        [bigint]$errormin = -1,
+        [bigint]$errormax,
         [string]$errormsg = $null
 
     )
@@ -277,6 +280,38 @@ function Get-ResultElement{
     return $result
 }
 
+# Check if sensor already exists
+function Check-SensorExists{
+    param(
+        [string]$sensorname
+        )
+
+    $sensorlist = (Get-Content $sensorlistfile)
+        
+    if(!$sensorlist -match $sensorname){
+        Write-Output $sensorname | out-file -FilePath $sensorlistfile -Append
+    }
+
+}
+
+# Get gneral array details
+function Get-ArrayDetails{
+    Show-Message "info" "Get Array Identification Details"
+
+    try{
+        $array = Invoke-RestMethod -Uri "$array/api/$apiversion/array" -websession $mysession -ContentType "application/json"
+        $global:arrayname = $array[0].array_name
+        $sensorlist = [string]::Format("{0}{1}-sensors.list", $scriptPath, $global:arrayname)
+        if(!(Test-Path $sensorlist)){
+            New-Item -ItemType File -Path $sensorlist | Out-Null
+            Show-Message "info" "Created sensor list file: $($sensorlist)"
+        }
+
+    }
+    catch{
+        ErrorState "1"  "Array Details Query Failed"  $_.Exception.Message
+    }
+}
 
 # Get Array Level Space Details
 function Get-ArraySpace{
@@ -285,7 +320,9 @@ function Get-ArraySpace{
 
     try{
         $arrayspace = Invoke-RestMethod -Uri "$array/api/$apiversion/array?space=true" -websession $mysession -ContentType "application/json"
-        
+
+        $sensorname = [string]::Format("{0}-Capacity", $arrayname)
+        $sensoroutput = [string]::Format("{0}<prtg>", $global:output)        
         $available = ($arrayspace[0].capacity - $arrayspace[0].total)
         $percentavailable = 1 / ($available / $arrayspace[0].capacity)
         $warningmin = ($arrayspace[0].capacity * .8)
@@ -295,49 +332,51 @@ function Get-ArraySpace{
         $warningmsg = "Consumed space high, clear space before error occurs"
         $errormsg = "Array space dangerous, clear space immediaitely"
 
-        $global:output += Get-ResultElement 
-                                -channel "Total Capacity" 
-                                -value $arrayspace[0].capacity 
-                                -unit "BytesDisk" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Total Capacity" `
+                                -value $arrayspace[0].capacity `
+                                -unit "BytesDisk" `
                                 -volumesize "GigaByte"
-        $global:output += Get-ResultElement 
-                                -channel "Capacity Used" 
-                                -value $arrayspace[0].total 
-                                -unit "BytesDisk" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Capacity Used" `
+                                -value $arrayspace[0].total `
+                                -unit "BytesDisk" `
+                                -volumesize "GigaByte" `
+                                -warningmin $warningmin `
+                                -warningmax $warningmax `
+                                -errormin $errormin `
+                                -errormax $errormax `
+                                -warningmsg $warningmsg `
+                                -errormsg $errormsg
+        $sensoroutput += Get-ResultElement `
+                                -channel "Capacity Available" `
+                                -value $available `
+                                -unit "BytesDisk" `
+                                -volumesize "GigaByte"
+        $sensoroutput += Get-ResultElement `
+                                -channel "Percent Free" `
+                                -value  $percentavailable `
+                                -unit "Percent" `
+                                -warningmin .8 `
+                                -warningmax .899 `
+                                -errormin .9 `
+                                -errormax 3  `
+                                -warningmsg $warningmsg `
+                                -errormsg $errormsg
+        $sensoroutput += Get-ResultElement `
+                                -channel "Unallocated Space" `
+                                -value $arrayspace[0].system `
+                                -unit "BytesDisk" `
                                 -volumesize "GigaByte" 
-                                -warningmin $warningmin 
-                                -warningmax $warningmax 
-                                -errormin $errormin 
-                                -errormax $errormax 
-                                -warningmsg $warningmsg 
-                                -errormsg $errormsg
-        $global:output += Get-ResultElement 
-                                -channel "Capacity Available" 
-                                -value $available 
-                                -unit "BytesDisk" 
-                                -volumesize "GigaByte"
-        $global:output += Get-ResultElement 
-                                -channel "Percent Free" 
-                                -value  $percentavailable 
-                                -unit "Percent" 
-                                -warningmin .8 
-                                -warningmax .899 
-                                -errormin .9 
-                                -errormax 3  
-                                -warningmsg $warningmsg 
-                                -errormsg $errormsg
-        $global:output += Get-ResultElement 
-                                -channel "Data Reduction Rate" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Data Reduction Rate" `
                                 -value $arrayspace[0].data_reduction
 
 
-        #write-host $arrayspace[0].shared_space
-        #write-host $arrayspace[0].snapshots
-        #write-host $arrayspace[0].system
-        #write-host $arrayspace[0].volumes
-        #write-host $arrayspace[0].thin_provisioning
-        #write-host $arrayspace[0].total_reduction
-        $global:output += "<text>Array Capacity Details</text>"
+        # shared_space snapshots volumesc thin_provisioning total_reduction
+        $sensoroutput += "<text>Array Capacity Details</text></prtg>"
+
+        Write-Output $sensoroutput
     }
     catch{
         ErrorState "1"  "Array Space Query Failed"  $_.Exception.Message
@@ -352,35 +391,39 @@ function Get-ArrayPerformance{
     try{
         $arrayperf = Invoke-RestMethod -Uri "$array/api/$apiversion/array?action=monitor" -websession $mysession -ContentType "application/json"
         
-        $global:output += Get-ResultElement 
-                                -channel "IOPs Reads" 
+        $sensorname = [string]::Format("{0}-Performance", $arrayname)
+        $sensoroutput = [string]::Format("{0}<prtg>", $global:output)        
+        $sensoroutput += Get-ResultElement `
+                                -channel "IOPs Reads" `
                                 -value $arrayperf[0].reads_per_sec
-        $global:output += Get-ResultElement 
-                                -channel "IOPs Writes" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "IOPs Writes" `
                                 -value $arrayperf[0].writes_per_sec
-        $global:output += Get-ResultElement 
-                                -channel "Bandwidth Read" 
-                                -value $arrayperf[0].output_per_sec
-                                -unit "BytesBandwidth" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Bandwidth Read" `
+                                -value $arrayperf[0].output_per_sec `
+                                -unit "BytesBandwidth" `
                                 -volumesize "MegaBit"
-        $global:output += Get-ResultElement 
-                                -channel "Bandwidth Write" 
-                                -value $arrayperf[0].input_per_sec 
-                                -unit "BytesBandwidth" 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Bandwidth Write" `
+                                -value $arrayperf[0].input_per_sec `
+                                -unit "BytesBandwidth" `
                                 -volumesize "MegaBit"
-        $global:output += Get-ResultElement 
-                                -channel "Latency Read μs" 
-                                -value $arrayperf[0].usec_per_read_op 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Latency Read μs" `
+                                -value $arrayperf[0].usec_per_read_op `
                                 -unit "TimeResponse"
-        $global:output += Get-ResultElement 
-                                -channel "Latency Write μs" 
-                                -value $arrayperf[0].usec_per_write_op 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Latency Write μs" `
+                                -value $arrayperf[0].usec_per_write_op `
                                 -unit "TimeResponse"
-        $global:output += Get-ResultElement 
-                                -channel "Queue Depth" 
-                                -value $arrayperf[0].queue_depth 
+        $sensoroutput += Get-ResultElement `
+                                -channel "Queue Depth" `
+                                -value $arrayperf[0].queue_depth `
                                 -float 0
-        $global:output += "<text>Array Performance Details</text>"
+        $sensoroutput += "<text>Array Performance Details</text></prtg>"
+
+        Write-Output $sensoroutput
     }
     catch{
         ErrorState "1"  "Array Perf Query Failed"  $_.Exception.Message
@@ -396,7 +439,12 @@ function Get-HardwareStatus{
 
         foreach($item in $hardware){
             if($item.name.substring(0,2) -eq "CT"){
-                $global:output += Get-ResultElement "Component $($item.name)" $hardware_status[$item.status] "Count" "none" 0 "One" $true ($scriptPath + $hardwareLookupFile)
+                $global:output += Get-ResultElement `
+                                        -channel "Component $($item.name)" `
+                                        -value $hardware_status[$item.status] `
+                                        -float 0 `
+                                        -notifychanged $true `
+                                        -valuelookup ($scriptPath + $hardwareLookupFile)
             } 
         }
         $global:output += "<text>Hardware Health</text>"
@@ -495,12 +543,13 @@ $timer.Start();
 
 
 $mysession = Get-Session
-$global:output = '<?xml version="1.0" encoding="UTF-8" ?><prtg>'
-
+Get-ArrayDetails
+Get-ArraySpace
+Get-ArrayPerformance
 
 switch($Scope.ToUpper()){
-    "CAPACITY"     {Get-ArraySpace}
-    "PERFORMANCE"  {Get-ArrayPerformance}
+    "CAPACITY"     {}
+    "PERFORMANCE"  {}
     "HARDWARE"     {Get-HardwareStatus}
     "DRIVE"        {Get-DriveStatus}
     "VOLUME"       {Get-VolumeStatus}
@@ -508,14 +557,11 @@ switch($Scope.ToUpper()){
     default        {Get-ArrayPerformance}
 }
 
-$global:output += '</prtg>'
-
 #Delete-Session
 $mysession = $null
 
 $timer.Stop();
 
-Write-Host $global:output
 
 Show-Message "information" "Elapsed Time: $($timer.Elapsed)"
 
