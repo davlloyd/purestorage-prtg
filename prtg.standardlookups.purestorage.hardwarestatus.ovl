@@ -7,8 +7,8 @@
       <SingleInt state="Ok" value="0">
         Ok
       </SingleInt>
-      <SingleInt state="Error" value="1">
-        Critical
+      <SingleInt state="Ok" value="1">
+        Not Installed
       </SingleInt>
       <SingleInt state="Warning" value="2">
         Noncritical
@@ -16,26 +16,26 @@
       <SingleInt state="Warning" value="3">
         Degraded
       </SingleInt>
-      <SingleInt state="Ok" value="4">
-        Not Installed
-      </SingleInt>
-      <SingleInt state="Warning" value="5">
+      <SingleInt state="Warning" value="4">
         Unknown
       </SingleInt>
-      <SingleInt state="Error" value="6">
-        Device Off
-      </SingleInt>
-      <SingleInt state="Error" value="7">
-        HWMan Internal Error
-      </SingleInt>
-      <SingleInt state="Warning" value="8">
+      <SingleInt state="Warning" value="5">
         Identifying
       </SingleInt>
-      <SingleInt state="Warning" value="9">
+      <SingleInt state="Warning" value="6">
         Fake Scanner
       </SingleInt>
-      <SingleInt state="Warning" value="10">
+      <SingleInt state="Warning" value="7">
         VM Scanner
+      </SingleInt>
+      <SingleInt state="Error" value="8">
+        Device Off
+      </SingleInt>
+      <SingleInt state="Error" value="9">
+        HWMan Internal Error
+      </SingleInt>
+      <SingleInt state="Error" value="10">
+        Critical
       </SingleInt>
     </Lookups>
   </ValueLookup>

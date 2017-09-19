@@ -10,29 +10,29 @@
       <SingleInt state="Ok" value="1">
         Empty
       </SingleInt>
-      <SingleInt state="Warning" value="2">
-        Evacuating
-      </SingleInt>
-      <SingleInt state="Warning" value="3">
-        Identifying
-      </SingleInt>
-      <SingleInt state="Error" value="4">
-        Unrecognized
-      </SingleInt>
-      <SingleInt state="Warning" value="5">
-        Unhealthy
-      </SingleInt>
-      <SingleInt state="Error" value="6">
-        Failed
-      </SingleInt>
-      <SingleInt state="Ok" value="7">
+      <SingleInt state="Ok" value="2">
         Updating
       </SingleInt>
-      <SingleInt state="Ok" value="8">
+      <SingleInt state="Ok" value="3">
         Unused
       </SingleInt>
-      <SingleInt state="Warning" value="9">
+      <SingleInt state="Warning" value="4">
+        Evacuating
+      </SingleInt>
+      <SingleInt state="Warning" value="5">
+        Identifying
+      </SingleInt>
+      <SingleInt state="Warning" value="6">
+        Unhealthy
+      </SingleInt>
+      <SingleInt state="Warning" value="7">
         Recovering
+      </SingleInt>
+      <SingleInt state="Error" value="8">
+        Unrecognized
+      </SingleInt>
+      <SingleInt state="Error" value="9">
+        Failed
       </SingleInt>
     </Lookups>
   </ValueLookup>
