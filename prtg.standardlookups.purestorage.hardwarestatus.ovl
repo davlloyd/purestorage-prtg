@@ -1,9 +1,6 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-  <ValueLookup id="prtg.standardlookups.purestorage.hardwarestatus" desiredValue="0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="PaeValueLookup.xsd">
+  <ValueLookup id="prtg.standardlookups.purestorage.hardwarestatus" desiredValue="0" undefinedState="Unknown" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="PaeValueLookup.xsd">
     <Lookups>
-      <SingleInt state="None" value="-1">
-        Unknown
-      </SingleInt>
       <SingleInt state="Ok" value="0">
         Ok
       </SingleInt>

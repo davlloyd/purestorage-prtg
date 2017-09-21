@@ -108,7 +108,7 @@ param(
     [string]$UserName = $null,
     [string]$Password = $null,
     [string]$APIKey = "3bdf3b60-f0c0-fa8a-83c1-b794ba8f562c",
-    [string]$Scope = "drive",
+    [string]$Scope = "hardware",
     [switch]$DebugDump = $false
 )
 
@@ -118,7 +118,7 @@ $apiversion = "1.6"
 [string]$array = "https://$($ArrayAddress)"
 $sensorlistfile = $null
 $scriptPath = "C:\Program Files (x86)\PRTG Network Monitor\Custom Sensors\EXEXML\";
-$global:output = '<prtg>'
+$global:output = "<?xml version='1.0' encoding='UTF-8' ?><prtg>"
 
 # Lookup files are used to translate between the integer values applied to each channel value in 
 # replacement for default textual values. PRTG requires numeric values
@@ -248,7 +248,8 @@ function Get-ResultElement{
         [int]$decimalmode = 0,
         [bool]$sensorwarning = $false,
         [bool]$limitmode = $false, 
-        [bool]$showchart = $true
+        [bool]$showchart = $true,
+        [bool]$showtable = $true
 
     )
 
@@ -291,6 +292,7 @@ function Get-ResultElement{
     if($limitmode){$result += "<LimitMode>1</LimitMode>"}
     if($sensorwarning){$result += "<Warning>1</Warning>"}
     if(!$showchart){$result += "<ShowChart>0</ShowChart>"}
+    if(!$showtable){$result += "<ShowTable>0</ShowTable>"}
 
 
     $result += "</Result>"
@@ -410,7 +412,11 @@ function Get-ArraySpace{
                                 -errormsg $unallocerrormsg
         $sensoroutput += Get-ResultElement `
                                 -channel "Data Reduction Rate" `
-                                -value $arrayspace[0].data_reduction
+                                -value $arrayspace[0].data_reduction `
+                                -float 1 `
+                                -decimalmode 1 `
+                                -showchart $false `
+                                -showtable $false
         #$sensoroutput += "<text>Array Capacity Details</text>"
         $sensoroutput += "</prtg>"
 
@@ -433,18 +439,24 @@ function Get-ArrayPerformance{
         $sensoroutput = $global:output      
         $sensoroutput += Get-ResultElement `
                                 -channel "Latency Read" `
-                                -value ($arrayperf[0].usec_per_read_op / 1000) `
-                                -unit "TimeResponse"
+                                -value $arrayperf[0].usec_per_read_op `
+                                -unit "custom" `
+                                -customunit "usec"
         $sensoroutput += Get-ResultElement `
                                 -channel "Latency Write" `
-                                -value ($arrayperf[0].usec_per_write_op / 1000) `
-                                -unit "TimeResponse"
+                                -value $arrayperf[0].usec_per_write_op `
+                                -unit "custom" `
+                                -customunit "usec"
         $sensoroutput += Get-ResultElement `
-                                -channel "IOPs Reads" `
-                                -value $arrayperf[0].reads_per_sec
+                                -channel "Read Operations" `
+                                -value $arrayperf[0].reads_per_sec `
+                                -unit "custom" `
+                                -customunit "IOPS"
         $sensoroutput += Get-ResultElement `
-                                -channel "IOPs Writes" `
-                                -value $arrayperf[0].writes_per_sec
+                                -channel "Write Operations" `
+                                -value $arrayperf[0].writes_per_sec `
+                                -unit "custom" `
+                                -customunit "IOPS"
         $sensoroutput += Get-ResultElement `
                                 -channel "Bandwidth Read" `
                                 -value $arrayperf[0].output_per_sec `
@@ -484,17 +496,41 @@ function Get-HardwareStatus{
         $hardware = Invoke-RestMethod -Uri "$array/api/$apiversion/hardware" -websession $mysession -ContentType "application/json"
 
         $sensorname = [string]::Format("{0}-Hardware", $arrayname)
-        $sensoroutput = $global:output      
+        $sensoroutput = $null  
+        $overallcondition = 0   
         foreach($item in $hardware){
-            $sensoroutput += Get-ResultElement `
-                                    -channel $item.name `
-                                    -value $hardware_status[$item.status] `
-                                    -float 0 `
-                                    -notifychanged $true `
-                                    -valuelookup "prtg.standardlookups.purestorage.hardwarestatus" `
-                                    -warningmax 2 `
-                                    -errormax 8
+            $hardwareid = ""
+            if($item.name.length -eq 3){
+                switch($item.name.substring(0,2)){
+                    "CH" {$hardwareid = [string]::Format("Chassis {0}", $item.name.substring(2,1))}
+                    "CT" {$hardwareid = [string]::Format("Controller {0}", $item.name.substring(2,1))}
+                    "SH" {$hardwareid = [string]::Format("Shelf {0}", $item.name.substring(2,1))}
+                    default {$hardwareid = $item.name}
+                }
+                $sensoroutput += Get-ResultElement `
+                                        -channel $hardwareid `
+                                        -value $hardware_status[$item.status] `
+                                        -float 0 `
+                                        -valuelookup $hardwareLookupFile `
+                                        -warningmax 2 `
+                                        -errormax 8
+                
+                if($hardware_status[$item.status] -eq 10){
+                    $overallcondition = 10}
+                elseif(($hardware_status[$item.status] -ge 2) -and ($overallcondition -ne 10)){
+                    $overallcondition = 3}
+
+            }
+
         }
+        $sensoroutput = $global:output + `
+                        (Get-ResultElement `
+                                    -channel "Hardware Overall" `
+                                    -value $overallcondition `
+                                    -float 0 `
+                                    -valuelookup $hardwareLookupFile `
+                                    -warningmax 2 `
+                                    -errormax 8) + $sensoroutput
         #$global:output += "<text>Hardware Health</text>"
         $sensoroutput += "</prtg>"
         Write-Output $sensoroutput
@@ -518,8 +554,7 @@ function Get-DriveStatus(){
                                     -channel $drive.name `
                                     -value $drive_status[$drive.status] `
                                     -float 0 `
-                                    -notifychanged $true `
-                                    -valuelookup "prtg.standardlookups.purestorage.drivestatus" `
+                                    -valuelookup $driveLookupFile `
                                     -warningmax 4 `
                                     -errormax 8 `
                                     -showchart $false
@@ -532,8 +567,7 @@ function Get-DriveStatus(){
                                 -channel "Drives Overall" `
                                 -value $overallcondition `
                                 -float 0 `
-                                -notifychanged $true `
-                                -valuelookup "prtg.standardlookups.purestorage.drivestatus" `
+                                -valuelookup $driveLookupFile `
                                 -warningmax 4 `
                                 -errormax 8) + $sensoroutput
 
