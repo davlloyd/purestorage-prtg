@@ -34,6 +34,7 @@ sensor maximum of 50 channels per sensor (not enforced)
 ---------------------------
 Version History
 
+Version 1.01 - Updated to fix issue with channnel status classifictaions for drive and hardware sensors
 Version 1.00 - Initial release, this will keep evolving  
 
 #>
@@ -413,7 +414,7 @@ function Get-ArraySpace{
         $sensoroutput += Get-ResultElement `
                                 -channel "Data Reduction Rate" `
                                 -value $arrayspace[0].data_reduction `
-                                -float 1 `
+                                -float 0 `
                                 -decimalmode 1 `
                                 -showchart $false `
                                 -showtable $false
@@ -510,10 +511,9 @@ function Get-HardwareStatus{
                 $sensoroutput += Get-ResultElement `
                                         -channel $hardwareid `
                                         -value $hardware_status[$item.status] `
-                                        -float 0 `
-                                        -valuelookup $hardwareLookupFile `
-                                        -warningmax 2 `
-                                        -errormax 8
+                                        -unit "custom" `
+                                        -customunit "Status" `
+                                        -valuelookup $hardwareLookupFile
                 
                 if($hardware_status[$item.status] -eq 10){
                     $overallcondition = 10}
@@ -527,10 +527,9 @@ function Get-HardwareStatus{
                         (Get-ResultElement `
                                     -channel "Hardware Overall" `
                                     -value $overallcondition `
-                                    -float 0 `
-                                    -valuelookup $hardwareLookupFile `
-                                    -warningmax 2 `
-                                    -errormax 8) + $sensoroutput
+                                    -unit "custom" `
+                                    -customunit "Status" `
+                                    -valuelookup $hardwareLookupFile) + $sensoroutput
         #$global:output += "<text>Hardware Health</text>"
         $sensoroutput += "</prtg>"
         Write-Output $sensoroutput
@@ -553,10 +552,9 @@ function Get-DriveStatus(){
             $sensoroutput += Get-ResultElement `
                                     -channel $drive.name `
                                     -value $drive_status[$drive.status] `
-                                    -float 0 `
+                                    -unit "custom" `
+                                    -customunit "Status" `
                                     -valuelookup $driveLookupFile `
-                                    -warningmax 4 `
-                                    -errormax 8 `
                                     -showchart $false
             
             if($drive_status[$drive.status] -gt 3){$overallcondition = 6}
@@ -566,10 +564,9 @@ function Get-DriveStatus(){
                         (Get-ResultElement `
                                 -channel "Drives Overall" `
                                 -value $overallcondition `
-                                -float 0 `
-                                -valuelookup $driveLookupFile `
-                                -warningmax 4 `
-                                -errormax 8) + $sensoroutput
+                                -unit "custom" `
+                                -customunit "Status" `
+                                -valuelookup $driveLookupFile) + $sensoroutput
 
         $sensoroutput += "</prtg>"
 
