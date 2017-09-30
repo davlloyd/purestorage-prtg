@@ -105,10 +105,10 @@ C:\PS>Get_PureFA-Sensor.ps1 -ArrayAddress 1.2.3.4 -Username pureuser -Password p
 
 param(
     #[Parameter(Mandatory=$true)]
-    [string]$ArrayAddress = "10.219.224.112",
+    [string]$ArrayAddress = $null,
     [string]$UserName = $null,
     [string]$Password = $null,
-    [string]$APIKey = "3bdf3b60-f0c0-fa8a-83c1-b794ba8f562c",
+    [string]$APIKey = $null,
     [string]$Scope = "hardware",
     [switch]$DebugDump = $false
 )
