@@ -34,6 +34,7 @@ sensor maximum of 50 channels per sensor (not enforced)
 ---------------------------
 Version History
 
+Version 1.10 - Added support for volume level monitoring
 Version 1.01 - Updated to fix issue with channnel status classifictaions for drive and hardware sensors
 Version 1.00 - Initial release, this will keep evolving  
 
@@ -64,12 +65,15 @@ Written for Purity REST API 1.6
     - (UserName) and (Password) or (APIKey) to gain access 
     - (Scope) to set which element to monitor with Sensor
    e.g. -arrayaddress '%host' -scope 'hardware' -apikey '3bdf3b60-f0c0-fa8a-83c1-b794ba8f562c'
-
+5) For the monitoring of individual volumes a sensor is created for each volume. As such the scope option 'volumemanage' is required to maintain these
+   sensors. THis then copies itself to a new sensor assigned to the holding device and updates the paramdeters accordingly. It also removes sensors of any 
+   volume that has been deleted 
+    - Create 'VolumeManage' sensor with the additional parameters -prtghosturl -prtguser -prtgpassword -DeviceID -SensorID
 
 
 .NOTES
 Author: lloydy@purestorage.com
-Version: 1.00
+Version: 1.10
 Date: 6/9/2017
 
 .PARAMETER ArraryAddress
@@ -92,14 +96,38 @@ Supported Scope Values:
 -   Performance      
 -   Hardware
 -   Drive
--   Volume (not currently supported)
+-   VolumeManage (creates a sensor for each volume)
+-   Volume (Sensor created dynamically)
 -   HostGroup (not currently supported)
 
-.PARAMETER DebugDump
-Will provice console promots duering execution. Can not be enabled when running a a sensor
+.PARAMETER Item
+For monitoring of volumes and hostgroups lets the sensor have the targetted item specified
 
-.EXAMPLE
+.PARAMETER SensorID
+For new sensor creation for volumes and host groups a copy of the calling sensor is created. This needs to be done with the SensorID so use 
+the parameter with the %sensorid which passes the sensorid through. This is required as the API does not currently support the creation of new sensors :(
+
+.PARAMETER DeviceID
+For new sensor creation this is the DeviceID of the parent device. Use the %deviceid parameter in the arguments
+
+.PARAMETER PRTGHostURL
+The URL to be used to make API calls back to the PRTG host to manage sensors eg http://prtg.domain.local, https://prtg.domain.local, https://prtg.domain.local:8443
+
+.PARAMETER PRTGUser
+Account to access PRTG API Service
+
+.PARAMETER PRTGPassword
+Password for account used to access PRTG API Service
+
+.PARAMETER DebugDump
+Will provide console prompts duering execution. Can not be enabled when running a a sensor
+
+.EXAMPLES
+Array Capacity Monitor
 C:\PS>Get_PureFA-Sensor.ps1 -ArrayAddress 1.2.3.4 -Username pureuser -Password purepassword -Scope Array
+Volume Sensor Manager
+C:\PS>Get_PureFA-Sensor.ps1 -ArrayAddress 1.2.3.4 -Username pureuser -Password purepassword -Scope VolumeManage -deviceid 1234 -sensorid 4321 -PRTGHostURL https://prtg.domain.local -PRTGUser admin -PRTGPassword password
+
 
 #>
 
@@ -109,7 +137,13 @@ param(
     [string]$UserName = $null,
     [string]$Password = $null,
     [string]$APIKey = $null,
-    [string]$Scope = "hardware",
+    [string]$Scope = $null,
+    [string]$Item = $null,
+    [string]$SensorID = $null,
+    [string]$DeviceID = $null,
+    [string]$PRTGHostURL = $null,
+    [string]$PRTGUser = $null,
+    [string]$PRTGPassword = $null,
     [switch]$DebugDump = $false
 )
 
@@ -117,9 +151,10 @@ param(
 $global:arrayname = $null
 $apiversion = "1.6"
 [string]$array = "https://$($ArrayAddress)"
-$sensorlistfile = $null
-$scriptPath = "C:\Program Files (x86)\PRTG Network Monitor\Custom Sensors\EXEXML\";
 $global:output = "<?xml version='1.0' encoding='UTF-8' ?><prtg>"
+$scriptName = $MyInvocation.MyCommand.Name
+$scriptPath = Split-Path $MyInvocation.MyCommand.Path
+$global:sensorlistfile = $null
 
 # Lookup files are used to translate between the integer values applied to each channel value in 
 # replacement for default textual values. PRTG requires numeric values
@@ -215,8 +250,8 @@ function Get-APIToken{
 function Get-Session{
 
     Show-Message "info" "Logging into the array"
-
-    if(!$apikey){$apikey = Get-APIToken $UserName $Password}
+    Set-Variable -Name APIKey -Value $APIKey -Scope 
+    if(!$APIKey){$Script:APIKey = Get-APIToken $UserName $Password}
     $apitoken = (ConvertTo-Json @{api_token=$APIKey})
 
     try{
@@ -307,12 +342,14 @@ function Check-SensorExists{
         [string]$sensorname
         )
 
-    $sensorlist = (Get-Content $sensorlistfile)
+    $sensorlist = (Get-Content $global:sensorlistfile)
         
-    if(!$sensorlist -match $sensorname){
-        Write-Output $sensorname | out-file -FilePath $sensorlistfile -Append
+    if(!($sensorlist -contains $sensorname)){
+        return $false
     }
-
+    else {
+        return $true
+    }
 }
 
 # Get gneral array details
@@ -322,10 +359,10 @@ function Get-ArrayDetails{
     try{
         $array = Invoke-RestMethod -Uri "$array/api/$apiversion/array" -websession $mysession -ContentType "application/json"
         $global:arrayname = $array[0].array_name
-        $sensorlist = [string]::Format("{0}{1}-sensors.list", $scriptPath, $global:arrayname)
-        if(!(Test-Path $sensorlist)){
-            New-Item -ItemType File -Path $sensorlist | Out-Null
-            Show-Message "info" "Created sensor list file: $($sensorlist)"
+        $global:sensorlistfile = [string]::Format("{0}\{1}-sensors.list", $scriptPath, $global:arrayname)
+        if(!(Test-Path $global:sensorlistfile)){
+            New-Item -ItemType File -Path $global:sensorlistfile | Out-Null
+            Show-Message "info" "Created sensor list file: $($global:sensorlistfile)"
         }
 
     }
@@ -559,7 +596,6 @@ function Get-DriveStatus(){
             
             if($drive_status[$drive.status] -gt 3){$overallcondition = 6}
         }
-        #$global:output += "<text>Drive Health</text>"
         $sensoroutput = $global:output + `
                         (Get-ResultElement `
                                 -channel "Drives Overall" `
@@ -577,40 +613,191 @@ function Get-DriveStatus(){
     }
 }
 
+# Function to create sensors for each volume
+function Create-VolumeSensors{
+    Show-Message "info" "Create Volume Sensors"
+
+    try{
+        $currentvolumes = Get-Content -raw $global:sensorlistfile | ConvertFrom-StringData
+
+        $volumes = Invoke-RestMethod -Uri "$array/api/$apiversion/volume" -websession $mysession -ContentType "application/json"
+        
+        foreach($volume in $volumes){
+            if(!(Check-SensorExists -sensorname $volume.name)){
+                Show-Message "info" "Create Volume: $($volume.name)"
+
+                # Create Sensor
+                $url = [string]::Format("{0}/api/duplicateobject.htm?id={1}&name={2}&targetid={3}&username={4}&password={5}",
+                                            $PRTGHostURL, $SensorID, "vol-$($volume.name)", $DeviceID, $PRTGUser, $PRTGPassword);
+
+                $request = Invoke-WebRequest -Uri $url -MaximumRedirection 0 -ErrorAction Ignore -UseBasicParsing
+                
+                if($request.StatusCode -ge 300 -and $request.StatusCode -lt 400) {
+                    $newSensorID = $request.Headers.Location.Split('=')[1]
+                    Show-Message "info" "Sensor created successfully. New sensor ID: $($newSensorID)";
+
+                    # Modify Sensor to set params to monitor volume
+                    $exeparams = [string]::Format("-arrayaddress '{0}' -apikey '{1}' -scope volume -item '{2}'", 
+                                            $ArrayAddress, $APIKey, $volume.name)
+
+                    $url = [string]::Format("{0}/api/setobjectproperty.htm?id={1}&name={2}&value={3}&username={4}&password={5}",
+                                            $PRTGHostURL, $newSensorID, "exeparams", $exeparams, $PRTGUser, $PRTGPassword);
+
+                    $request = Invoke-WebRequest -Uri $url -UseBasicParsing
+
+                    if($request.StatusCode -eq 200){
+                        # Unpause Sensor
+                        $url = [string]::Format("{0}/api/pause.htm?id={1}&action=1&username={2}&password={3}",
+                                                    $PRTGHostURL, $newSensorID, $PRTGUser, $PRTGPassword);
+                        $request = Invoke-WebRequest -Uri $url -UseBasicParsing
+                        if($request.StatusCode -eq 200){
+                            Show-Message "info" "Sensor ID: $($newSensorID) updated and started successfully";
+
+                            # Append new sensor name and ID to list file
+                            Write-Output "$($volume.name) = $($newSensorID)" | Add-Content $global:sensorlistfile
+                        }
+                    }
+
+
+                }
+                else{
+                    ErrorState "1" "Volume Sensor creation Failed. PRTG returned code $($request.StatusCode)"
+                }
+
+
+            }
+            else{
+                $currentvolumes.Remove($volume.name)
+            }
+        }
+        
+        
+        # Cleanup sensors of Volumes deleted from array
+        if($currentvolumes.Count -gt 0){
+            $sensorlist = (Get-Content $global:sensorlistfile)
+            foreach ($item in $currentvolumes){
+                if(Delete-Sensor -sensorid $item.Value){
+                    $sensorlist.Replace("$($item.Name) = $($item.Value)`n", "") 
+                }
+            }
+            Write-Host $sensorlist | Out-File $global:sensorlistfile
+        }
+
+    }
+    catch{
+        ErrorState "1" "Volume Sensor creation Failed" $_.Exception.Message
+    }
+}
+
+# Delete specified sensor
+function Delete-Sensor{
+    param(
+        [string]$sensorid
+        )
+
+        $url = [string]::Format("{0}/api/deleteobject.htm?id={1}&approve=1&username={2}&password={3}", $PRTGHostURL, $sensorid, $PRTGUser, $PRTGPassword)
+        $request = Invoke-WebRequest -Uri $url
+
+        if($request.StatusCode -eq 200){
+            return $true}
+        else{
+            return $false
+        }
+}
+
 # get Volume Level Details
 function Get-VolumeStatus{
 
     Show-Message "info" "Get Volume Details"
 
-    try{
-        $volumes = Invoke-RestMethod -Uri "$array/api/$apiversion/volume?space=true" -websession $mysession -ContentType "application/json"
-        foreach($volume in $volumes){
-            #Show-Message "info" "Volume: $($volume.name)"
-            #write-host $volume.name
-            Get-VolumePerf $volume.name
-            #write-host $volume.data_reduction
-            #write-host $volume.size
-            #write-host $volume.total
-            #write-host $volume.total_reduction
-        }
+    if($Item){
+        try{
+            Show-Message "info" "Volume: $($Item)"
+            $volume = Invoke-RestMethod -Uri "$array/api/$apiversion/volume/$($Item)?space=true" -websession $mysession -ContentType "application/json"
+            $available = ($volume.size - $volume.total)
+            $percentfree = [math]::Round((($available / $volume.size) * 100))
+            $global:output += Get-ResultElement `
+                                -channel "Free Space %" `
+                                -value  $percentfree `
+                                -unit "Percent" `
+                                -warningmin 20 `
+                                -errormin 10  `
+                                -warningmsg "Volume Capacity +80% Full" `
+                                -errormsg "Volume Capacity +90% Full" `
+                                -float 1 `
+                                -decimalmode 1
+            $global:output += Get-ResultElement `
+                                -channel "Size" `
+                                -value $volume.size `
+                                -unit "BytesDisk" `
+                                -volumesize "MegaByte" `
+                                -float 0 `
+                                -showchart $false
+            $global:output += Get-ResultElement `
+                                -channel "Space Available" `
+                                -value $available `
+                                -unit "BytesDisk" `
+                                -volumesize "MegaByte" `
+                                -float 0 `
+                                -warningmin ($volume.size * .8) `
+                                -errormin (($volume.size * .9)) `
+                                -warningmsg "Volume Capacity +80% Full" `
+                                -errormsg "Volume Capacity +90% Full"
+            Get-VolumePerf $Item
+            $global:output += "</prtg>"
 
-    }
-    catch{
-        ErrorState "1" "Volume Usage Query Failed" $_.Exception.Message
+            Write-Host $global:output
+
+        }
+        catch{
+            ErrorState "1" "Volume Usage Query Failed" $_.Exception.Message
+        }
+    } 
+    else{
+        ErrorState "1" "Volume 'Item' name parameter not set"
     }
 }
 
+# Get Volume level performance statistics
 function Get-VolumePerf($volname){
     Show-Message "info" "Get Volume Performance Stats for $($volname)"
 
     try{
         $volperf = Invoke-RestMethod -Uri "$array/api/$apiversion/volume/$($volname)?action=monitor" -websession $mysession -ContentType "application/json"
-        #write-host $volperf.input_per_sec
-        #write-host $volperf.output_per_sec
-        #write-host $volperf.reads_per_sec
-        #write-host $volperf_writes_per_sec
-        #write-host $volperf.usec_per_read_op
-        #write-host $volperf.usec_per_write_op
+        $global:output += Get-ResultElement `
+                                -channel "Latency Read" `
+                                -value $volperf.usec_per_read_op `
+                                -unit "custom" `
+                                -customunit "usec"
+        $global:output += Get-ResultElement `
+                                -channel "Latency Write" `
+                                -value $volperf.usec_per_write_op `
+                                -unit "custom" `
+                                -customunit "usec"
+        $global:output += Get-ResultElement `
+                                -channel "Read Operations" `
+                                -value $volperf.reads_per_sec `
+                                -unit "custom" `
+                                -customunit "IOPS"
+        $global:output += Get-ResultElement `
+                                -channel "Write Operations" `
+                                -value $volperf.writes_per_sec `
+                                -unit "custom" `
+                                -customunit "IOPS"
+        $global:output += Get-ResultElement `
+                                -channel "Bandwidth Read" `
+                                -value $volperf.output_per_sec `
+                                -float 0 `
+                                -decimalmode 0 `
+                                -unit "BytesBandwidth" `
+                                -volumesize "MegaBit"
+        $global:output += Get-ResultElement `
+                                -channel "Bandwidth Write" `
+                                -value $volperf.input_per_sec `
+                                -float 0 `
+                                -decimalmode 0 `
+                                -unit "BytesBandwidth" `
+                                -volumesize "MegaBit"
     }
     catch{
         ErrorState "1" "Volume Performance Query Failed" $_.Exception.Message
@@ -654,6 +841,7 @@ switch($Scope.ToUpper()){
     "PERFORMANCE"  {Get-ArrayPerformance}
     "HARDWARE"     {Get-HardwareStatus}
     "DRIVE"        {Get-DriveStatus}
+    "VOLUMEMANAGE" {Create-VolumeSensors}
     "VOLUME"       {Get-VolumeStatus}
     "HOSTGROUP"    {Get-HostGroupPerf}
     default        {Get-ArrayPerformance}
