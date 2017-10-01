@@ -745,11 +745,7 @@ function Get-VolumeStatus{
                                 -value $available `
                                 -unit "BytesDisk" `
                                 -volumesize "MegaByte" `
-                                -float 0 `
-                                -warningmin ($volume.size * .8) `
-                                -errormin (($volume.size * .9)) `
-                                -warningmsg "Volume Capacity +80% Full" `
-                                -errormsg "Volume Capacity +90% Full"
+                                -float 0
             Get-VolumePerf $Item
             $global:output += "</prtg>"
 
