@@ -617,15 +617,19 @@ function Get-DriveStatus(){
 function Create-VolumeSensors{
     Show-Message "info" "Create Volume Sensors"
 
+    $action = "Enumerate Volumes"
     try{
         $currentvolumes = Get-Content -raw $global:sensorlistfile | ConvertFrom-StringData
-
+        if ($currentvolumes.Count -eq 0){
+            $currentvolumes = @{"dummy"=1}
+        }
         $volumes = Invoke-RestMethod -Uri "$array/api/$apiversion/volume" -websession $mysession -ContentType "application/json"
         
         foreach($volume in $volumes){
-            if(!(Check-SensorExists -sensorname $volume.name)){
+            if(!($currentvolumes[$volume.name])){
                 Show-Message "info" "Create Volume: $($volume.name)"
 
+                $action = "Create sensor"
                 # Create Sensor
                 $url = [string]::Format("{0}/api/duplicateobject.htm?id={1}&name={2}&targetid={3}&username={4}&password={5}",
                                             $PRTGHostURL, $SensorID, "vol-$($volume.name)", $DeviceID, $PRTGUser, $PRTGPassword);
@@ -633,7 +637,13 @@ function Create-VolumeSensors{
                 $request = Invoke-WebRequest -Uri $url -MaximumRedirection 0 -ErrorAction Ignore -UseBasicParsing
                 
                 if($request.StatusCode -ge 300 -and $request.StatusCode -lt 400) {
+                    $action = "Update sensor"
                     $newSensorID = $request.Headers.Location.Split('=')[1]
+
+                    # Append new sensor name and ID to list file
+                    $action = "Add file entry"
+                    Write-Output "$($volume.name) = $($newSensorID)" | Add-Content $global:sensorlistfile
+
                     Show-Message "info" "Sensor created successfully. New sensor ID: $($newSensorID)";
 
                     # Modify Sensor to set params to monitor volume
@@ -647,23 +657,20 @@ function Create-VolumeSensors{
 
                     if($request.StatusCode -eq 200){
                         # Unpause Sensor
+                        $action = "Unpause sensor"
                         $url = [string]::Format("{0}/api/pause.htm?id={1}&action=1&username={2}&password={3}",
                                                     $PRTGHostURL, $newSensorID, $PRTGUser, $PRTGPassword);
                         $request = Invoke-WebRequest -Uri $url -UseBasicParsing
                         if($request.StatusCode -eq 200){
                             Show-Message "info" "Sensor ID: $($newSensorID) updated and started successfully";
 
-                            # Append new sensor name and ID to list file
-                            Write-Output "$($volume.name) = $($newSensorID)" | Add-Content $global:sensorlistfile
                         }
                     }
-
 
                 }
                 else{
                     ErrorState "1" "Volume Sensor creation Failed. PRTG returned code $($request.StatusCode)"
                 }
-
 
             }
             else{
@@ -671,21 +678,21 @@ function Create-VolumeSensors{
             }
         }
         
-        
         # Cleanup sensors of Volumes deleted from array
         if($currentvolumes.Count -gt 0){
+            $action = "Sensor cleanup"
             $sensorlist = (Get-Content $global:sensorlistfile)
             foreach ($item in $currentvolumes){
                 if(Delete-Sensor -sensorid $item.Value){
                     $sensorlist.Replace("$($item.Name) = $($item.Value)`n", "") 
                 }
             }
-            Write-Host $sensorlist | Out-File $global:sensorlistfile
+            Write-Host $sensorlist | Out-File $global:sensorlistfile | Out-Null
         }
-
+        Write-Host "<prtg><result><channel>Scan Status</channel><value>1</value></result></prtg>"
     }
     catch{
-        ErrorState "1" "Volume Sensor creation Failed" $_.Exception.Message
+        ErrorState "1" "Volume Sensor creation Failed at $($action) with " $_.Exception.Message
     }
 }
 
