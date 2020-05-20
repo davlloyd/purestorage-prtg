@@ -831,9 +831,9 @@ function Delete-Session{
 
 $timer = [system.diagnostics.stopwatch]::StartNew()
 
-# Set Certificate validation
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+# Allow all SSL protocols
+$AllProtocols = [System.Net.SecurityProtocolType]'Ssl3,Tls,Tls11,Tls12'
+[System.Net.ServicePointManager]::SecurityProtocol = $AllProtocols
 
 
 $mysession = Get-Session
